@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 
 st.set_page_config(page_title="NFL Prediction Dashboard", layout="wide")
 
-st.title("🏈 NFL Dynamic Predictor & Performance Dashboard")
+st.title("NFL Dynamic Predictor & Performance Dashboard")
 st.markdown("Live analytics powered by SQLite database metrics and logistic win probability modeling.")
 
 # 1. Load Data from SQLite
@@ -129,7 +129,54 @@ with col_vis2:
 
 st.markdown("---")
 
-# 7. Dynamic Matchup Simulator
+# 7. Official Upcoming Matchup Predictions
+st.subheader("📅 Official Scheduled Matchups")
+
+# Find games with no final score recorded
+upcoming_games = model_df[model_df["result"].isnull()].copy()
+
+latest_team_form = team_stats.sort_values("gameday").groupby("team").last().reset_index().set_index("team")
+
+if not upcoming_games.empty:
+    target_season = upcoming_games["season"].max()
+    season_sched = upcoming_games[upcoming_games["season"] == target_season]
+    available_weeks = sorted(season_sched["week"].unique())
+    
+    selected_week = st.selectbox("Select Upcoming Week", available_weeks)
+    week_games = season_sched[season_sched["week"] == selected_week].copy()
+
+    cards = []
+    for _, row in week_games.iterrows():
+        ht, at = row["home_team"], row["away_team"]
+        h_epa = latest_team_form.loc[ht, "roll_off_epa"] if ht in latest_team_form.index else 0.0
+        a_epa = latest_team_form.loc[at, "roll_off_epa"] if at in latest_team_form.index else 0.0
+        h_def = latest_team_form.loc[ht, "roll_def_epa"] if ht in latest_team_form.index else 0.0
+        a_def = latest_team_form.loc[at, "roll_def_epa"] if at in latest_team_form.index else 0.0
+        h_rest = latest_team_form.loc[ht, "rest_days"] if ht in latest_team_form.index else 7.0
+        a_rest = latest_team_form.loc[at, "rest_days"] if at in latest_team_form.index else 7.0
+        spread = row["spread_line"] if pd.notnull(row["spread_line"]) else 0.0
+
+        sample = pd.DataFrame([{
+            "diff_off_epa": h_epa - a_epa,
+            "diff_def_epa": a_def - h_def,
+            "diff_rest": h_rest - a_rest,
+            "spread_line": spread
+        }])
+        prob = clf.predict_proba(scaler.transform(sample[feature_cols]))[0][1]
+        cards.append({
+            "Matchup": f"{at} @ {ht}",
+            "Date": row.get("gameday", "TBD"),
+            "Vegas Spread": spread,
+            f"{ht} Win Prob": f"{prob * 100:.1f}%",
+            f"{at} Win Prob": f"{(1 - prob) * 100:.1f}%"
+        })
+    st.dataframe(pd.DataFrame(cards), use_container_width=True)
+else:
+    st.info("No upcoming games without final scores found in nfl_data.db. You can run the custom simulator below.")
+
+st.markdown("---")
+
+# 8. Dynamic Matchup Simulator
 st.subheader("🎯 Upcoming Matchup Predictor")
 
 latest_team_form = team_stats.sort_values("gameday").groupby("team").last().reset_index()
