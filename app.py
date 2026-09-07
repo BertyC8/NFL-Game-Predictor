@@ -88,28 +88,7 @@ y = training_data["home_win"]
 clf = LogisticRegression()
 clf.fit(X_scaled, y)
 
-# 5. Visualizations
-st.subheader("📊 Model Visualizations")
-c_vis1, c_vis2 = st.columns(2)
-sns.set_theme(style="whitegrid")
-
-with c_vis1:
-    fig1, ax1 = plt.subplots(figsize=(7, 4))
-    corr = training_data[["home_win", "spread_line", "diff_off_epa", "diff_def_epa", "diff_win_total"]].corr()
-    sns.heatmap(corr, annot=True, cmap="vlag", center=0, fmt=".2f", linewidths=0.5, ax=ax1)
-    ax1.set_title("Feature Correlations with Game Winner", weight="bold")
-    st.pyplot(fig1)
-
-with c_vis2:
-    fig2, ax2 = plt.subplots(figsize=(7, 4))
-    sns.kdeplot(data=training_data, x="diff_win_total", hue="home_win", common_norm=False, fill=True, palette=["#e74c3c", "#2ecc71"], ax=ax2)
-    ax2.set_title("Vegas Win Total Differential (Wins vs Losses)", weight="bold")
-    ax2.set_xlabel("Home Vegas Line - Away Vegas Line")
-    st.pyplot(fig2)
-
-st.markdown("---")
-
-# 6. Official Scheduled Matchups with Machine Picks
+# 5. Scheduled Matchups & Machine Winner Picks (With Upset Detection)
 st.subheader("📅 Scheduled Matchups & Machine Winner Picks")
 
 upcoming_games = model_df[model_df["result"].isnull()].copy()
@@ -148,13 +127,17 @@ if not upcoming_games.empty:
         winner = ht if prob >= 0.50 else at
         confidence = prob if prob >= 0.50 else (1 - prob)
 
+        # Underdog / Upset detection logic
+        is_underdog_pick = (winner == ht and spread > 0) or (winner == at and spread < 0)
+        pick_label = f"⚡ UPSET: {winner}" if is_underdog_pick else f"🏆 {winner}"
+
         cards.append({
             "Matchup": f"{at} @ {ht}",
             "Date": row.get("gameday", "TBD"),
             "Spread": spread,
             f"{ht} Win Total": h_wt,
             f"{at} Win Total": a_wt,
-            "Machine Pick": f"🏆 {winner}",
+            "Machine Pick": pick_label,
             "Confidence": f"{confidence * 100:.1f}%"
         })
     st.dataframe(pd.DataFrame(cards), use_container_width=True)
@@ -163,7 +146,65 @@ else:
 
 st.markdown("---")
 
-# 7. Custom Matchup Simulator (Predicts Clear Winner)
+# 6. Machine Accuracy & Performance Tracking (Directly Under Picks)
+st.subheader("📈 Machine Accuracy & Performance Tracker")
+
+completed = training_data.copy()
+completed["pred_prob"] = clf.predict_proba(X_scaled)[:, 1]
+completed["pred_home_win"] = (completed["pred_prob"] >= 0.50).astype(int)
+completed["correct_pick"] = (completed["pred_home_win"] == completed["home_win"]).astype(int)
+
+eval_seasons = sorted(completed["season"].unique(), reverse=True)
+selected_eval_season = st.selectbox("Select Season to Evaluate", eval_seasons)
+
+season_df = completed[completed["season"] == selected_eval_season].copy()
+total_games = len(season_df)
+correct_picks = season_df["correct_pick"].sum()
+overall_acc = (correct_picks / total_games) * 100 if total_games > 0 else 0.0
+
+m1, m2, m3 = st.columns(3)
+m1.metric("Season Accuracy", f"{overall_acc:.1f}%")
+m2.metric("Total Correct Picks", f"{correct_picks} / {total_games}")
+m3.metric("Underdog Hits", f"{len(season_df[(season_df['correct_pick'] == 1) & (season_df['spread_line'] > 0)])}")
+
+st.markdown("#### Weekly Accuracy Trend")
+weekly_acc = season_df.groupby("week")["correct_pick"].agg(["count", "sum"]).reset_index()
+weekly_acc["accuracy"] = (weekly_acc["sum"] / weekly_acc["count"]) * 100
+
+fig_week, ax_week = plt.subplots(figsize=(10, 3))
+sns.lineplot(data=weekly_acc, x="week", y="accuracy", marker="o", color="#2ecc71", linewidth=2.5, ax=ax_week)
+ax_week.axhline(50, color="gray", linestyle="--", alpha=0.6, label="50% Coin Flip")
+ax_week.set_ylim(30, 100)
+ax_week.set_ylabel("Accuracy %")
+ax_week.set_xlabel("Week")
+ax_week.set_title(f"{selected_eval_season} Machine Prediction Accuracy by Week", weight="bold")
+st.pyplot(fig_week)
+
+st.markdown("#### Team-by-Team Performance")
+home_records = season_df[["home_team", "correct_pick"]].rename(columns={"home_team": "team"})
+away_records = season_df[["away_team", "correct_pick"]].rename(columns={"away_team": "team"})
+team_eval = pd.concat([home_records, away_records])
+
+team_perf = team_eval.groupby("team")["correct_pick"].agg(
+    total_games="count",
+    correct_picks="sum"
+).reset_index()
+
+team_perf["accuracy_pct"] = (team_perf["correct_picks"] / team_perf["total_games"]) * 100
+team_perf = team_perf.sort_values(by="accuracy_pct", ascending=False).reset_index(drop=True)
+
+team_perf["Accuracy"] = team_perf["accuracy_pct"].map("{:.1f}%".format)
+team_perf = team_perf.rename(columns={
+    "team": "Team",
+    "total_games": "Games Predicted",
+    "correct_picks": "Correct Calls"
+})
+
+st.dataframe(team_perf[["Team", "Accuracy", "Correct Calls", "Games Predicted"]], use_container_width=True)
+
+st.markdown("---")
+
+# 7. Custom Matchup Simulator (Predicts Clear Winner + Upset Flag)
 st.subheader("🎯 Custom Matchup Simulator")
 
 team_list = sorted(vegas_win_totals_2026.keys())
@@ -203,69 +244,32 @@ else:
     predicted_winner = home_select if prediction == 1 else away_select
     winner_prob = prob if prediction == 1 else (1.0 - prob)
 
+    # Simulator Upset Flag
+    sim_underdog = (predicted_winner == home_select and spread_input > 0) or (predicted_winner == away_select and spread_input < 0)
+    badge = "⚡ UPSET ALERT: " if sim_underdog else "🏆 Machine Pick: "
+
     st.markdown(f"**Season Win Totals:** {home_select}: `{h_wt}` | {away_select}: `{a_wt}` (Differential: `{h_wt - a_wt:+.1f}`)")
-    st.success(f"### 🏆 Machine Pick: **{predicted_winner}** to win outright")
+    st.success(f"### {badge}**{predicted_winner}** to win outright")
     st.caption(f"Calculated win confidence: **{winner_prob * 100:.1f}%**")
     st.progress(float(prob))
 
 st.markdown("---")
 
-# 8. Machine Accuracy & Performance Tracking
-st.subheader("📈 Machine Accuracy & Performance Tracker")
+# 8. Visualizations
+st.subheader("📊 Model Feature Visualizations")
+c_vis1, c_vis2 = st.columns(2)
+sns.set_theme(style="whitegrid")
 
-completed = training_data.copy()
+with c_vis1:
+    fig1, ax1 = plt.subplots(figsize=(7, 4))
+    corr = training_data[["home_win", "spread_line", "diff_off_epa", "diff_def_epa", "diff_win_total"]].corr()
+    sns.heatmap(corr, annot=True, cmap="vlag", center=0, fmt=".2f", linewidths=0.5, ax=ax1)
+    ax1.set_title("Feature Correlations with Game Winner", weight="bold")
+    st.pyplot(fig1)
 
-# Generate model predictions
-completed["pred_prob"] = clf.predict_proba(X_scaled)[:, 1]
-completed["pred_home_win"] = (completed["pred_prob"] >= 0.50).astype(int)
-completed["correct_pick"] = (completed["pred_home_win"] == completed["home_win"]).astype(int)
-
-eval_seasons = sorted(completed["season"].unique(), reverse=True)
-selected_eval_season = st.selectbox("Select Season to Evaluate", eval_seasons)
-
-season_df = completed[completed["season"] == selected_eval_season].copy()
-
-total_games = len(season_df)
-correct_picks = season_df["correct_pick"].sum()
-overall_acc = (correct_picks / total_games) * 100 if total_games > 0 else 0.0
-
-m1, m2, m3 = st.columns(3)
-m1.metric("Season Accuracy", f"{overall_acc:.1f}%")
-m2.metric("Total Correct Picks", f"{correct_picks} / {total_games}")
-m3.metric("Underdog Hits", f"{len(season_df[(season_df['correct_pick'] == 1) & (season_df['spread_line'] > 0)])}")
-
-st.markdown("#### Weekly Accuracy Trend")
-weekly_acc = season_df.groupby("week")["correct_pick"].agg(["count", "sum"]).reset_index()
-weekly_acc["accuracy"] = (weekly_acc["sum"] / weekly_acc["count"]) * 100
-
-fig_week, ax_week = plt.subplots(figsize=(10, 3))
-sns.lineplot(data=weekly_acc, x="week", y="accuracy", marker="o", color="#2ecc71", linewidth=2.5, ax=ax_week)
-ax_week.axhline(50, color="gray", linestyle="--", alpha=0.6, label="50% Coin Flip")
-ax_week.set_ylim(30, 100)
-ax_week.set_ylabel("Accuracy %")
-ax_week.set_xlabel("Week")
-ax_week.set_title(f"{selected_eval_season} Machine Prediction Accuracy by Week", weight="bold")
-st.pyplot(fig_week)
-
-st.markdown("#### Team-by-Team Performance")
-
-home_records = season_df[["home_team", "correct_pick"]].rename(columns={"home_team": "team"})
-away_records = season_df[["away_team", "correct_pick"]].rename(columns={"away_team": "team"})
-team_eval = pd.concat([home_records, away_records])
-
-team_perf = team_eval.groupby("team")["correct_pick"].agg(
-    total_games="count",
-    correct_picks="sum"
-).reset_index()
-
-team_perf["accuracy_pct"] = (team_perf["correct_picks"] / team_perf["total_games"]) * 100
-team_perf = team_perf.sort_values(by="accuracy_pct", ascending=False).reset_index(drop=True)
-
-team_perf["Accuracy"] = team_perf["accuracy_pct"].map("{:.1f}%".format)
-team_perf = team_perf.rename(columns={
-    "team": "Team",
-    "total_games": "Games Predicted",
-    "correct_picks": "Correct Calls"
-})
-
-st.dataframe(team_perf[["Team", "Accuracy", "Correct Calls", "Games Predicted"]], use_container_width=True)
+with c_vis2:
+    fig2, ax2 = plt.subplots(figsize=(7, 4))
+    sns.kdeplot(data=training_data, x="diff_win_total", hue="home_win", common_norm=False, fill=True, palette=["#e74c3c", "#2ecc71"], ax=ax2)
+    ax2.set_title("Vegas Win Total Differential (Wins vs Losses)", weight="bold")
+    ax2.set_xlabel("Home Vegas Line - Away Vegas Line")
+    st.pyplot(fig2)
