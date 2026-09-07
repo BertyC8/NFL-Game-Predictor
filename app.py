@@ -251,16 +251,17 @@ else:
     winner_prob = prob if prediction == 1 else (1.0 - prob)
 
     # Simulator Upset Flag
-    sim_underdog = (predicted_winner == home_select and spread_input < 0) or (predicted_winner == away_select and spread_input > 0)
-    badge = "⚡ UPSET ALERT: " if sim_underdog else "🏆 Machine Pick: "
+    sim_is_upset = (predicted_winner == home_select and spread_input > 0.5) or \
+                   (predicted_winner == away_select and spread_input < -0.5)
 
-    st.markdown(f"**Season Win Totals:** {home_select}: `{h_wt}` | {away_select}: `{a_wt}` (Differential: `{h_wt - a_wt:+.1f}`)")
-    if sim_underdog:
-        st.warning(f"### ⚡ UPSET ALERT: Machine projects **{predicted_winner}** to win outright despite being the underdog!")
+    st.markdown(f"**Season Win Totals:** {home_select}: `{h_wt}` | {away_select}: `{a_wt}` (Differential: `{diff_wt:+.1f}`)")
+
+    if sim_is_upset:
+        st.warning(f"### ⚡ UPSET ALERT: Machine projects **{predicted_winner}** to win outright despite being the betting underdog!")
     else:
         st.success(f"### 🏆 Machine Pick: **{predicted_winner}** to win outright")
 
-    st.caption(f"Calculated win confidence: **{winner_prob * 100:.1f}%** | Vegas Line: **{spread_input:+.1f}**")
+    st.caption(f"Calculated win confidence: **{winner_prob * 100:.1f}%** | Spread: **{spread_input:+.1f}**")
     st.progress(float(prob))
     
 st.markdown("---")
