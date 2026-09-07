@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 
 st.set_page_config(page_title="NFL Prediction Dashboard", layout="wide")
 
-st.title("NFL Dynamic Predictor & Performance Dashboard")
+st.title("🏈 NFL Dynamic Predictor & Performance Dashboard")
 st.markdown("Live analytics powered by SQLite database metrics and logistic win probability modeling.")
 
 # 1. Load Data from SQLite
@@ -23,7 +23,7 @@ def load_data():
 
 games, pbp = load_data()
 
-# 2. Standardize Franchise Abbreviations (fixes historic naming mismatches)
+# 2. Standardize Franchise Abbreviations
 team_map = {
     "OAK": "LV",
     "WAS": "WSH",
@@ -49,11 +49,9 @@ team_stats = pd.merge(off_stats, def_stats, on=["game_id", "team"]).merge(
     games[["game_id", "season", "week", "gameday"]].drop_duplicates(subset=["game_id"]), on="game_id"
 ).sort_values(["team", "season", "week"])
 
-# Rest Days
 team_stats["gameday"] = pd.to_datetime(team_stats["gameday"])
 team_stats["rest_days"] = team_stats.groupby(["team", "season"])["gameday"].diff().dt.days.fillna(7)
 
-# 3-game rolling averages (shift 1 to prevent data leakage)
 team_stats["roll_off_epa"] = (
     team_stats.groupby("team")["off_epa"]
     .transform(lambda x: x.shift(1).rolling(3, min_periods=1).mean())
@@ -67,12 +65,10 @@ team_stats["roll_def_epa"] = (
     .fillna(0)
 )
 
-# 4. Map Stats Directly to Home and Away Matchups
+# 4. Map Historical Features
 metrics_dict = team_stats.set_index(["game_id", "team"])[["roll_off_epa", "roll_def_epa", "rest_days"]].to_dict("index")
 
 model_df = games.copy()
-
-# Look up metrics safely without merge drops
 model_df["home_off_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["home_team"]), {}).get("roll_off_epa", 0.0), axis=1)
 model_df["home_def_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["home_team"]), {}).get("roll_def_epa", 0.0), axis=1)
 model_df["home_rest"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["home_team"]), {}).get("rest_days", 7.0), axis=1)
@@ -81,17 +77,18 @@ model_df["away_off_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id
 model_df["away_def_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["away_team"]), {}).get("roll_def_epa", 0.0), axis=1)
 model_df["away_rest"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["away_team"]), {}).get("rest_days", 7.0), axis=1)
 
-# Differentials
 model_df["diff_off_epa"] = model_df["home_off_epa"] - model_df["away_off_epa"]
 model_df["diff_def_epa"] = model_df["away_def_epa"] - model_df["home_def_epa"]
 model_df["diff_rest"] = model_df["home_rest"] - model_df["away_rest"]
 model_df["spread_line"] = model_df["spread_line"].fillna(0.0)
-model_df["home_win"] = (model_df["result"] > 0).astype(int)
+
+# 5. Train Model on Completed Games
+completed_games = model_df[model_df["result"].notnull()].copy()
+completed_games["home_win"] = (completed_games["result"] > 0).astype(int)
 
 feature_cols = ["diff_off_epa", "diff_def_epa", "diff_rest", "spread_line"]
-training_data = model_df.dropna(subset=feature_cols + ["home_win"]).copy()
+training_data = completed_games.dropna(subset=feature_cols + ["home_win"]).copy()
 
-# 5. Train Model
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(training_data[feature_cols])
 y = training_data["home_win"]
@@ -102,7 +99,6 @@ clf.fit(X_scaled, y)
 # 6. Seaborn Visualizations
 st.subheader("📊 Live Data Distribution & EPA Advantage")
 col_vis1, col_vis2 = st.columns(2)
-
 sns.set_theme(style="whitegrid")
 
 with col_vis1:
@@ -176,11 +172,9 @@ else:
 
 st.markdown("---")
 
-# 8. Dynamic Matchup Simulator
-st.subheader("🎯 Upcoming Matchup Predictor")
-
-latest_team_form = team_stats.sort_values("gameday").groupby("team").last().reset_index()
-team_list = sorted(latest_team_form["team"].unique())
+# 8. Custom Sandbox Simulator
+st.subheader("🎯 Custom Matchup Simulator")
+team_list = sorted(team_stats["team"].unique())
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -193,26 +187,20 @@ with c3:
 if home_select == away_select:
     st.warning("Please choose two different teams.")
 else:
-    h_row = latest_team_form[latest_team_form["team"] == home_select].iloc[0]
-    a_row = latest_team_form[latest_team_form["team"] == away_select].iloc[0]
-
-    diff_off = h_row["roll_off_epa"] - a_row["roll_off_epa"]
-    diff_def = a_row["roll_def_epa"] - h_row["roll_def_epa"]
-    diff_rest = h_row["rest_days"] - a_row["rest_days"]
+    h_row = latest_team_form.loc[home_select]
+    a_row = latest_team_form.loc[away_select]
 
     matchup_sample = pd.DataFrame([{
-        "diff_off_epa": diff_off,
-        "diff_def_epa": diff_def,
-        "diff_rest": diff_rest,
+        "diff_off_epa": h_row["roll_off_epa"] - a_row["roll_off_epa"],
+        "diff_def_epa": a_row["roll_def_epa"] - h_row["roll_def_epa"],
+        "diff_rest": h_row["rest_days"] - a_row["rest_days"],
         "spread_line": spread_input
     }])
 
     scaled_sample = scaler.transform(matchup_sample[feature_cols])
     home_prob = clf.predict_proba(scaled_sample)[0][1]
-    away_prob = 1.0 - home_prob
 
-    st.markdown("### Prediction Results")
     res_col1, res_col2 = st.columns(2)
-    res_col1.metric(f"{home_select} (Home Win Probability)", f"{home_prob * 100:.1f}%")
-    res_col2.metric(f"{away_select} (Away Win Probability)", f"{away_prob * 100:.1f}%")
+    res_col1.metric(f"{home_select} Win Probability", f"{home_prob * 100:.1f}%")
+    res_col2.metric(f"{away_select} Win Probability", f"{(1.0 - home_prob) * 100:.1f}%")
     st.progress(float(home_prob))
