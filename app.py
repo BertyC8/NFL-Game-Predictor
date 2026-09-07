@@ -128,8 +128,14 @@ if not upcoming_games.empty:
         confidence = prob if prob >= 0.50 else (1 - prob)
 
         # Underdog / Upset detection logic
-        is_underdog_pick = (winner == ht and spread > 0) or (winner == at and spread < 0)
-        pick_label = f"⚡ UPSET: {winner}" if is_underdog_pick else f"🏆 {winner}"
+        is_upset = (winner == ht and spread < -0.5) or (winner == at and spread > 0.5)
+
+        if is_upset:
+            pick_label = f"⚡ UPSET: {winner}"
+            badge_color = "linear-gradient(90deg, #f59e0b 0%, #d97706 100%)" # Amber badge
+        else:
+            pick_label = f"🏆 PICK: {winner}"
+            badge_color = "linear-gradient(90deg, #10b981 0%, #059669 100%)" # Emerald badge
 
         cards.append({
             "Matchup": f"{at} @ {ht}",
