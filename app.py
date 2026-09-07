@@ -204,7 +204,68 @@ else:
     winner_prob = prob if prediction == 1 else (1.0 - prob)
 
     st.markdown(f"**Season Win Totals:** {home_select}: `{h_wt}` | {away_select}: `{a_wt}` (Differential: `{h_wt - a_wt:+.1f}`)")
-    
     st.success(f"### 🏆 Machine Pick: **{predicted_winner}** to win outright")
     st.caption(f"Calculated win confidence: **{winner_prob * 100:.1f}%**")
     st.progress(float(prob))
+
+st.markdown("---")
+
+# 8. Machine Accuracy & Performance Tracking
+st.subheader("📈 Machine Accuracy & Performance Tracker")
+
+completed = training_data.copy()
+
+# Generate model predictions
+completed["pred_prob"] = clf.predict_proba(X_scaled)[:, 1]
+completed["pred_home_win"] = (completed["pred_prob"] >= 0.50).astype(int)
+completed["correct_pick"] = (completed["pred_home_win"] == completed["home_win"]).astype(int)
+
+eval_seasons = sorted(completed["season"].unique(), reverse=True)
+selected_eval_season = st.selectbox("Select Season to Evaluate", eval_seasons)
+
+season_df = completed[completed["season"] == selected_eval_season].copy()
+
+total_games = len(season_df)
+correct_picks = season_df["correct_pick"].sum()
+overall_acc = (correct_picks / total_games) * 100 if total_games > 0 else 0.0
+
+m1, m2, m3 = st.columns(3)
+m1.metric("Season Accuracy", f"{overall_acc:.1f}%")
+m2.metric("Total Correct Picks", f"{correct_picks} / {total_games}")
+m3.metric("Underdog Hits", f"{len(season_df[(season_df['correct_pick'] == 1) & (season_df['spread_line'] > 0)])}")
+
+st.markdown("#### Weekly Accuracy Trend")
+weekly_acc = season_df.groupby("week")["correct_pick"].agg(["count", "sum"]).reset_index()
+weekly_acc["accuracy"] = (weekly_acc["sum"] / weekly_acc["count"]) * 100
+
+fig_week, ax_week = plt.subplots(figsize=(10, 3))
+sns.lineplot(data=weekly_acc, x="week", y="accuracy", marker="o", color="#2ecc71", linewidth=2.5, ax=ax_week)
+ax_week.axhline(50, color="gray", linestyle="--", alpha=0.6, label="50% Coin Flip")
+ax_week.set_ylim(30, 100)
+ax_week.set_ylabel("Accuracy %")
+ax_week.set_xlabel("Week")
+ax_week.set_title(f"{selected_eval_season} Machine Prediction Accuracy by Week", weight="bold")
+st.pyplot(fig_week)
+
+st.markdown("#### Team-by-Team Performance")
+
+home_records = season_df[["home_team", "correct_pick"]].rename(columns={"home_team": "team"})
+away_records = season_df[["away_team", "correct_pick"]].rename(columns={"away_team": "team"})
+team_eval = pd.concat([home_records, away_records])
+
+team_perf = team_eval.groupby("team")["correct_pick"].agg(
+    total_games="count",
+    correct_picks="sum"
+).reset_index()
+
+team_perf["accuracy_pct"] = (team_perf["correct_picks"] / team_perf["total_games"]) * 100
+team_perf = team_perf.sort_values(by="accuracy_pct", ascending=False).reset_index(drop=True)
+
+team_perf["Accuracy"] = team_perf["accuracy_pct"].map("{:.1f}%".format)
+team_perf = team_perf.rename(columns={
+    "team": "Team",
+    "total_games": "Games Predicted",
+    "correct_picks": "Correct Calls"
+})
+
+st.dataframe(team_perf[["Team", "Accuracy", "Correct Calls", "Games Predicted"]], use_container_width=True)
