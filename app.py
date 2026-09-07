@@ -165,7 +165,7 @@ overall_acc = (correct_picks / total_games) * 100 if total_games > 0 else 0.0
 m1, m2, m3 = st.columns(3)
 m1.metric("Season Accuracy", f"{overall_acc:.1f}%")
 m2.metric("Total Correct Picks", f"{correct_picks} / {total_games}")
-m3.metric("Underdog Hits", f"{len(season_df[(season_df['correct_pick'] == 1) & (season_df['spread_line'] > 0)])}")
+m3.metric("Underdog Hits", f"{len(season_df[(season_df['correct_pick'] == 1) & (((season_df['home_win'] == 1) & (season_df['spread_line'] < 0)) | ((season_df['home_win'] == 0) & (season_df['spread_line'] > 0)))])}")
 
 st.markdown("#### Weekly Accuracy Trend")
 weekly_acc = season_df.groupby("week")["correct_pick"].agg(["count", "sum"]).reset_index()
