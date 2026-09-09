@@ -271,8 +271,8 @@ else:
     winner_prob = prob if prediction == 1 else (1.0 - prob)
 
     # In simulator input: spread_input > 0 means Home is underdog, spread_input < 0 means Away is underdog
-    sim_is_upset = (predicted_winner == home_select and spread_input > 0.5) or \
-                   (predicted_winner == away_select and spread_input < -0.5)
+    sim_is_upset = (predicted_winner == home_select and spread_input <= 0.5) or \
+                   (predicted_winner == away_select and spread_input >= -0.5)
 
     st.markdown(f"**Season Win Totals:** {home_select}: `{h_wt}` | {away_select}: `{a_wt}` (Differential: `{diff_wt:+.1f}`)")
 
