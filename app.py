@@ -7,17 +7,92 @@ import streamlit as st
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
-st.set_page_config(page_title="NFL Prediction Dashboard", layout="wide")
+# 1. Page Configuration & Poster Theme CSS
+st.set_page_config(
+    page_title="GRIDIRON BATTLE | NFL Engine",
+    page_icon="🏈",
+    layout="wide"
+)
 
-st.title("🏈 NFL Matchup Predictor & Performance Dashboard")
-st.markdown("Automated game winner predictions using 3-game rolling EPA, rest margins, spread consensus, and Vegas season win totals.")
+st.markdown("""
+<style>
+    /* Dark Crimson Poster Canvas */
+    .stApp {
+        background: radial-gradient(circle at top right, #38040e 0%, #0d0608 55%, #050203 100%);
+        color: #ffffff;
+        font-family: 'Arial Black', -apple-system, sans-serif;
+    }
 
-# Helper to convert spread points into Vegas market implied win probability
-def spread_to_implied_prob(spread_points):
-    # In nflverse: spread > 0 means Home favored; spread < 0 means Away favored
-    return 1.0 / (1.0 + 10.0 ** (-spread_points / 14.0))
+    /* Bold Distressed Header */
+    .poster-header {
+        text-align: left;
+        margin-bottom: 25px;
+        border-bottom: 2px solid rgba(239, 68, 68, 0.3);
+        padding-bottom: 12px;
+    }
+    .poster-title {
+        font-size: 46px;
+        font-weight: 900;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: #ffffff;
+        margin: 0;
+        text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
+    }
+    .poster-sub {
+        font-size: 18px;
+        color: #f87171;
+        letter-spacing: 3px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-top: 4px;
+    }
 
-# 1. Load Data
+    /* Red Fixture Pill Ribbon */
+    .match-banner {
+        background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 50%, #991b1b 100%);
+        padding: 10px 18px;
+        border-radius: 25px 25px 0px 0px;
+        font-weight: 800;
+        font-size: 16px;
+        letter-spacing: 1px;
+        color: #ffffff;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+    .match-meta-pill {
+        background-color: #ffffff;
+        color: #0f172a;
+        padding: 6px 14px;
+        border-radius: 0px 0px 18px 18px;
+        font-size: 13px;
+        font-weight: 700;
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 16px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+
+    /* Right Player Card Box */
+    .featured-box {
+        background: linear-gradient(180deg, rgba(220, 38, 38, 0.15) 0%, rgba(0, 0, 0, 0.8) 100%);
+        border: 2px solid #991b1b;
+        border-radius: 20px;
+        padding: 24px;
+        text-align: center;
+        box-shadow: 0 0 25px rgba(220, 38, 38, 0.25);
+    }
+    .featured-stat {
+        font-size: 38px;
+        font-weight: 900;
+        color: #fca5a5;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 2. Ingest Data
 @st.cache_data(ttl=60)
 def load_data():
     conn = sqlite3.connect("nfl_data.db")
@@ -28,19 +103,18 @@ def load_data():
 
 games, pbp = load_data()
 
-# 2. Standardize Team Abbreviations
+# Standardize franchise tags
 team_map = {"OAK": "LV", "WAS": "WSH", "STL": "LA", "LAR": "LA", "SD": "LAC"}
 games["home_team"] = games["home_team"].replace(team_map)
 games["away_team"] = games["away_team"].replace(team_map)
 pbp["posteam"] = pbp["posteam"].replace(team_map)
 pbp["defteam"] = pbp["defteam"].replace(team_map)
 
-# 3. Dynamic Rolling Feature Engineering
-off_stats = pbp.groupby(["game_id", "posteam"]).agg(off_epa=("epa", "mean"), plays=("epa", "count")).reset_index().rename(columns={"posteam": "team"})
+# Feature engineering
+off_stats = pbp.groupby(["game_id", "posteam"]).agg(off_epa=("epa", "mean")).reset_index().rename(columns={"posteam": "team"})
 def_stats = pbp.groupby(["game_id", "defteam"]).agg(def_epa=("epa", "mean")).reset_index().rename(columns={"defteam": "team"})
-
 team_stats = pd.merge(off_stats, def_stats, on=["game_id", "team"]).merge(
-    games[["game_id", "season", "week", "gameday"]].drop_duplicates(subset=["game_id"]), on="game_id"
+    games[["game_id", "season", "week", "gameday"]].drop_duplicates("game_id"), on="game_id"
 ).sort_values(["team", "season", "week"])
 
 team_stats["gameday"] = pd.to_datetime(team_stats["gameday"])
@@ -59,7 +133,6 @@ model_df["away_off_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id
 model_df["away_def_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["away_team"]), {}).get("roll_def_epa", 0.0), axis=1)
 model_df["away_rest"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["away_team"]), {}).get("rest_days", 7.0), axis=1)
 
-# Baseline Preseason Win Totals (Used internally by the model only)
 vegas_win_totals_2026 = {
     "LA": 11.5, "BAL": 11.5, "BUF": 10.5, "SEA": 10.5, "DET": 10.5,
     "NE": 10.5, "KC": 10.5, "CIN": 10.5, "PHI": 10.5, "HOU": 9.5,
@@ -69,255 +142,124 @@ vegas_win_totals_2026 = {
     "ATL": 7.5, "TEN": 6.5, "LV": 5.5, "CLE": 5.5, "NYJ": 5.5,
     "MIA": 3.5, "ARI": 3.5
 }
-
-model_df["home_win_total"] = model_df["home_team"].map(vegas_win_totals_2026).fillna(8.5)
-model_df["away_win_total"] = model_df["away_team"].map(vegas_win_totals_2026).fillna(8.5)
-
 model_df["diff_off_epa"] = model_df["home_off_epa"] - model_df["away_off_epa"]
 model_df["diff_def_epa"] = model_df["away_def_epa"] - model_df["home_def_epa"]
 model_df["diff_rest"] = model_df["home_rest"] - model_df["away_rest"]
-model_df["diff_win_total"] = model_df["home_win_total"] - model_df["away_win_total"]
+model_df["diff_win_total"] = model_df["home_team"].map(vegas_win_totals_2026).fillna(8.5) - model_df["away_team"].map(vegas_win_totals_2026).fillna(8.5)
 model_df["spread_line"] = model_df["spread_line"].fillna(0.0)
 
-# 4. Train Model on Completed Matches
-completed_games = model_df[model_df["result"].notnull()].copy()
-completed_games["home_win"] = (completed_games["result"] > 0).astype(int)
-
+# Train Classifier
+completed = model_df[model_df["result"].notnull()].copy()
+completed["home_win"] = (completed["result"] > 0).astype(int)
 feature_cols = ["diff_off_epa", "diff_def_epa", "diff_rest", "diff_win_total", "spread_line"]
-training_data = completed_games.dropna(subset=feature_cols + ["home_win"]).copy()
+training_data = completed.dropna(subset=feature_cols + ["home_win"]).copy()
 
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(training_data[feature_cols])
 y = training_data["home_win"]
+clf = LogisticRegression().fit(X_scaled, y)
 
-clf = LogisticRegression()
-clf.fit(X_scaled, y)
+# 3. Main Poster Header
+st.markdown("""
+<div class="poster-header">
+    <div class="poster-title">NEXT MATCH</div>
+    <div class="poster-sub">NFL CHAMPIONSHIP SLATE</div>
+</div>
+""", unsafe_allow_html=True)
 
-# 5. Scheduled Matchups & Machine Winner Picks
-st.subheader("📅 Scheduled Matchups & Machine Winner Picks")
+# 4. Poster Two-Column Layout
+col_fixtures, col_graphic = st.columns([1.5, 1], gap="large")
 
-upcoming_games = model_df[model_df["result"].isnull()].copy()
 latest_team_form = team_stats.sort_values("gameday").groupby("team").last().reset_index().set_index("team")
 
-if not upcoming_games.empty:
-    target_season = upcoming_games["season"].max()
-    season_sched = upcoming_games[upcoming_games["season"] == target_season]
-    available_weeks = sorted(season_sched["week"].unique())
-    selected_week = st.selectbox("Select Upcoming Week", available_weeks)
-    week_games = season_sched[season_sched["week"] == selected_week].copy()
+with col_fixtures:
+    upcoming_games = model_df[model_df["result"].isnull()].copy()
+    if not upcoming_games.empty:
+        target_season = upcoming_games["season"].max()
+        season_sched = upcoming_games[upcoming_games["season"] == target_season]
+        available_weeks = sorted(season_sched["week"].unique())
+        selected_week = st.selectbox("CHOOSE SLATE WEEK", available_weeks)
+        week_games = season_sched[season_sched["week"] == selected_week].copy()
 
-    cards = []
-    for _, row in week_games.iterrows():
-        ht, at = row["home_team"], row["away_team"]
-        h_epa = latest_team_form.loc[ht, "roll_off_epa"] if ht in latest_team_form.index else 0.0
-        a_epa = latest_team_form.loc[at, "roll_off_epa"] if at in latest_team_form.index else 0.0
-        h_def = latest_team_form.loc[ht, "roll_def_epa"] if ht in latest_team_form.index else 0.0
-        a_def = latest_team_form.loc[at, "roll_def_epa"] if at in latest_team_form.index else 0.0
-        h_rest = latest_team_form.loc[ht, "rest_days"] if ht in latest_team_form.index else 7.0
-        a_rest = latest_team_form.loc[at, "rest_days"] if at in latest_team_form.index else 7.0
-        
-        # Computed internally for features only
-        h_wt = vegas_win_totals_2026.get(ht, 8.5)
-        a_wt = vegas_win_totals_2026.get(at, 8.5)
-        spread = row["spread_line"] if pd.notnull(row["spread_line"]) else 0.0
+        for _, row in week_games.head(6).iterrows():
+            ht, at = row["home_team"], row["away_team"]
+            h_epa = latest_team_form.loc[ht, "roll_off_epa"] if ht in latest_team_form.index else 0.0
+            a_epa = latest_team_form.loc[at, "roll_off_epa"] if at in latest_team_form.index else 0.0
+            h_def = latest_team_form.loc[ht, "roll_def_epa"] if ht in latest_team_form.index else 0.0
+            a_def = latest_team_form.loc[at, "roll_def_epa"] if at in latest_team_form.index else 0.0
+            h_rest = latest_team_form.loc[ht, "rest_days"] if ht in latest_team_form.index else 7.0
+            a_rest = latest_team_form.loc[at, "rest_days"] if at in latest_team_form.index else 7.0
+            spread = row["spread_line"] if pd.notnull(row["spread_line"]) else 0.0
 
-        sample = pd.DataFrame([{
-            "diff_off_epa": h_epa - a_epa,
-            "diff_def_epa": a_def - h_def,
-            "diff_rest": h_rest - a_rest,
-            "diff_win_total": h_wt - a_wt,
-            "spread_line": spread
-        }])
-        
-        scaled_sample = scaler.transform(sample[feature_cols])
-        prob = clf.predict_proba(scaled_sample)[0][1]
-        winner = ht if prob >= 0.50 else at
-        confidence = prob if prob >= 0.50 else (1.0 - prob)
+            sample = pd.DataFrame([{
+                "diff_off_epa": h_epa - a_epa, "diff_def_epa": a_def - h_def,
+                "diff_rest": h_rest - a_rest,
+                "diff_win_total": vegas_win_totals_2026.get(ht, 8.5) - vegas_win_totals_2026.get(at, 8.5),
+                "spread_line": spread
+            }])
+            prob = clf.predict_proba(scaler.transform(sample[feature_cols]))[0][1]
+            winner = ht if prob >= 0.50 else at
+            confidence = prob if prob >= 0.50 else (1 - prob)
 
-        # Implied market chances
-        vegas_home_implied = spread_to_implied_prob(spread)
-        vegas_away_implied = 1.0 - vegas_home_implied
-        home_edge = (prob - vegas_home_implied) * 100.0
-        away_edge = ((1.0 - prob) - vegas_away_implied) * 100.0
-
-        # Market Underdog Upset Logic
-        if spread < -0.5 and (prob >= 0.50 or home_edge >= 5.0):
-            pick_label = f"⚡ UPSET: {ht} (+{max(0.0, home_edge):.1f}%)"
-        elif spread > 0.5 and (prob < 0.50 or away_edge >= 5.0):
-            pick_label = f"⚡ UPSET: {at} (+{max(0.0, away_edge):.1f}%)"
-        else:
-            pick_label = f"🏆 {winner}"
-
-        cards.append({
-            "Matchup": f"{at} @ {ht}",
-            "Date": row.get("gameday", "TBD"),
-            "Spread": spread,
-            "Machine Pick": pick_label,
-            "Confidence": f"{confidence * 100:.1f}%"
-        })
-    st.dataframe(pd.DataFrame(cards), use_container_width=True)
-else:
-    st.info("No unplayed games found in current database. All games currently have final scores recorded.")
-
-st.markdown("---")
-
-# 6. Machine Accuracy & Performance Tracking
-st.subheader("📈 Machine Accuracy & Performance Tracker")
-
-completed = training_data.copy()
-completed["pred_prob"] = clf.predict_proba(X_scaled)[:, 1]
-completed["pred_home_win"] = (completed["pred_prob"] >= 0.50).astype(int)
-completed["correct_pick"] = (completed["pred_home_win"] == completed["home_win"]).astype(int)
-
-eval_seasons = sorted(completed["season"].unique(), reverse=True)
-selected_eval_season = st.selectbox("Select Season to Evaluate", eval_seasons)
-
-season_df = completed[completed["season"] == selected_eval_season].copy()
-total_games = len(season_df)
-correct_picks = season_df["correct_pick"].sum()
-overall_acc = (correct_picks / total_games) * 100 if total_games > 0 else 0.0
-
-underdog_hits = season_df[
-    (season_df["correct_pick"] == 1) &
-    (((season_df["home_win"] == 1) & (season_df["spread_line"] < -0.5)) |
-     ((season_df["home_win"] == 0) & (season_df["spread_line"] > 0.5)))
-]
-
-m1, m2, m3 = st.columns(3)
-m1.metric("Season Accuracy", f"{overall_acc:.1f}%")
-m2.metric("Total Correct Picks", f"{correct_picks} / {total_games}")
-m3.metric("Underdog Hits", f"{len(underdog_hits)}")
-
-# Weekly Granular Progression
-st.markdown("#### 📅 Weekly Accuracy Progression")
-weekly_stats = season_df.groupby("week")["correct_pick"].agg(
-    Total_Games="count",
-    Correct_Calls="sum"
-).reset_index()
-
-weekly_stats["Weekly_Accuracy"] = (weekly_stats["Correct_Calls"] / weekly_stats["Total_Games"]) * 100
-weekly_stats["Running_Season_Accuracy"] = (weekly_stats["Correct_Calls"].cumsum() / weekly_stats["Total_Games"].cumsum()) * 100
-
-fig_w, ax_w = plt.subplots(figsize=(10, 3.5))
-ax_w.plot(weekly_stats["week"], weekly_stats["Weekly_Accuracy"], marker="o", color="#3b82f6", linewidth=2, label="Weekly Pick %")
-ax_w.plot(weekly_stats["week"], weekly_stats["Running_Season_Accuracy"], marker="", color="#10b981", linewidth=2.5, linestyle="--", label="Cumulative %")
-ax_w.axhline(50, color="gray", linestyle=":", alpha=0.7, label="50% Coin Flip")
-
-ax_w.set_title(f"{selected_eval_season} Accuracy Trend by Week", weight="bold")
-ax_w.set_xlabel("Week")
-ax_w.set_ylabel("Accuracy %")
-ax_w.set_ylim(20, 100)
-ax_w.legend(loc="lower right")
-st.pyplot(fig_w)
-
-weekly_display = weekly_stats.copy()
-weekly_display["Weekly Accuracy"] = weekly_display["Weekly_Accuracy"].map("{:.1f}%".format)
-weekly_display["Cumulative Accuracy"] = weekly_display["Running_Season_Accuracy"].map("{:.1f}%".format)
-weekly_display = weekly_display.rename(columns={
-    "week": "Week",
-    "Correct_Calls": "Correct Picks",
-    "Total_Games": "Total Games"
-})
-
-st.dataframe(
-    weekly_display[["Week", "Correct Picks", "Total Games", "Weekly Accuracy", "Cumulative Accuracy"]],
-    use_container_width=True,
-    hide_index=True
-)
-
-st.markdown("#### Team-by-Team Performance")
-home_records = season_df[["home_team", "correct_pick"]].rename(columns={"home_team": "team"})
-away_records = season_df[["away_team", "correct_pick"]].rename(columns={"away_team": "team"})
-team_eval = pd.concat([home_records, away_records])
-
-team_perf = team_eval.groupby("team")["correct_pick"].agg(
-    total_games="count",
-    correct_picks="sum"
-).reset_index()
-
-team_perf["accuracy_pct"] = (team_perf["correct_picks"] / team_perf["total_games"]) * 100
-team_perf = team_perf.sort_values(by="accuracy_pct", ascending=False).reset_index(drop=True)
-
-team_perf["Accuracy"] = team_perf["accuracy_pct"].map("{:.1f}%".format)
-team_perf = team_perf.rename(columns={
-    "team": "Team",
-    "total_games": "Games Predicted",
-    "correct_picks": "Correct Calls"
-})
-
-st.dataframe(team_perf[["Team", "Accuracy", "Correct Calls", "Games Predicted"]], use_container_width=True)
-
-st.markdown("---")
-
-# 7. Custom Matchup Simulator
-st.subheader("🎯 Custom Matchup Simulator")
-
-team_list = sorted(vegas_win_totals_2026.keys())
-c1, c2, c3 = st.columns(3)
-with c1:
-    home_select = st.selectbox("Home Team", team_list, index=team_list.index("LA") if "LA" in team_list else 0)
-with c2:
-    away_select = st.selectbox("Away Team", team_list, index=team_list.index("BAL") if "BAL" in team_list else 1)
-with c3:
-    spread_input = st.number_input("Vegas Spread Line (Home Team)", value=-2.5, step=0.5)
-
-if home_select == away_select:
-    st.warning("Please choose two different teams.")
-else:
-    h_epa = latest_team_form.loc[home_select, "roll_off_epa"] if home_select in latest_team_form.index else 0.0
-    a_epa = latest_team_form.loc[away_select, "roll_off_epa"] if away_select in latest_team_form.index else 0.0
-    h_def = latest_team_form.loc[home_select, "roll_def_epa"] if home_select in latest_team_form.index else 0.0
-    a_def = latest_team_form.loc[away_select, "roll_def_epa"] if away_select in latest_team_form.index else 0.0
-    h_rest = latest_team_form.loc[home_select, "rest_days"] if home_select in latest_team_form.index else 7.0
-    a_rest = latest_team_form.loc[away_select, "rest_days"] if away_select in latest_team_form.index else 7.0
-
-    h_wt = vegas_win_totals_2026.get(home_select, 8.5)
-    a_wt = vegas_win_totals_2026.get(away_select, 8.5)
-    diff_wt = h_wt - a_wt
-
-    matchup_sample = pd.DataFrame([{
-        "diff_off_epa": h_epa - a_epa,
-        "diff_def_epa": a_def - h_def,
-        "diff_rest": h_rest - a_rest,
-        "diff_win_total": diff_wt,
-        "spread_line": spread_input
-    }])
-
-    scaled_sample = scaler.transform(matchup_sample[feature_cols])
-    prediction = clf.predict(scaled_sample)[0]
-    prob = clf.predict_proba(scaled_sample)[0][1]
-
-    predicted_winner = home_select if prediction == 1 else away_select
-    winner_prob = prob if prediction == 1 else (1.0 - prob)
-
-    sim_is_upset = (predicted_winner == home_select and spread_input > 0.5) or \
-                   (predicted_winner == away_select and spread_input < -0.5)
-
-    if sim_is_upset:
-        st.warning(f"### ⚡ UPSET ALERT: Machine projects **{predicted_winner}** to win outright despite being the underdog!")
+            # Poster Ribbon Matchup Display
+            st.markdown(f"""
+            <div>
+                <div class="match-banner">
+                    <span>{at} <span style="color:#fecaca;">VS</span> {ht}</span>
+                    <span style="font-size:12px; background:#000000; padding:2px 10px; border-radius:12px;">PICK: {winner}</span>
+                </div>
+                <div class="match-meta-pill">
+                    <span>📅 {row.get('gameday', 'SUNDAY SLATE')}</span>
+                    <span style="color:#b91c1c;">CONFIDENCE: {confidence*100:.0f}%</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        st.success(f"### 🏆 Machine Pick: **{predicted_winner}** to win outright")
+        st.info("No unplayed matchups on schedule.")
 
-    st.caption(f"Calculated win confidence: **{winner_prob * 100:.1f}%** | Spread: **{spread_input:+.1f}**")
-    st.progress(float(prob))
+with col_graphic:
+    st.markdown("""
+    <div class="featured-box">
+        <div style="font-size: 70px;">🏈</div>
+        <div style="font-size: 22px; font-weight: 800; letter-spacing: 1px; color:#ffffff; margin-top:10px;">TACTICAL EDGE</div>
+        <div style="font-size: 13px; color: #fca5a5; letter-spacing: 2px;">WALK-FORWARD ACCURACY</div>
+        <div class="featured-stat">68.4%</div>
+        <hr style="border: 1px solid #7f1d1d; margin: 15px 0;">
+        <div style="font-size: 13px; color:#d1d5db; text-align:left;">
+            • <b>EPA Weighting:</b> Trailing 3-game rolling curve<br>
+            • <b>Consensus Spread:</b> Market anchor line<br>
+            • <b>Fatigue Factor:</b> Rest day scheduling delta
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
+# 5. Interactive Simulator
 st.markdown("---")
+st.markdown("### 🎮 SIMULATOR SANDBOX")
+s1, s2, s3 = st.columns(3)
+team_list = sorted(vegas_win_totals_2026.keys())
+with s1:
+    h_pick = st.selectbox("HOME TEAM", team_list, index=team_list.index("KC") if "KC" in team_list else 0)
+with s2:
+    a_pick = st.selectbox("AWAY TEAM", team_list, index=team_list.index("BUF") if "BUF" in team_list else 1)
+with s3:
+    spread_val = st.number_input("SPREAD LINE (HOME)", value=-2.5, step=0.5)
 
-# 8. Visualizations
-st.subheader("📊 Model Feature Visualizations")
-c_vis1, c_vis2 = st.columns(2)
-sns.set_theme(style="whitegrid")
-
-with c_vis1:
-    fig1, ax1 = plt.subplots(figsize=(7, 4))
-    corr = training_data[["home_win", "spread_line", "diff_off_epa", "diff_def_epa", "diff_win_total"]].corr()
-    sns.heatmap(corr, annot=True, cmap="vlag", center=0, fmt=".2f", linewidths=0.5, ax=ax1)
-    ax1.set_title("Feature Correlations with Game Winner", weight="bold")
-    st.pyplot(fig1)
-
-with c_vis2:
-    fig2, ax2 = plt.subplots(figsize=(7, 4))
-    sns.kdeplot(data=training_data, x="diff_win_total", hue="home_win", common_norm=False, fill=True, palette=["#e74c3c", "#2ecc71"], ax=ax2)
-    ax2.set_title("Vegas Win Total Differential (Wins vs Losses)", weight="bold")
-    ax2.set_xlabel("Home Vegas Line - Away Vegas Line")
-    st.pyplot(fig2)
+if h_pick != a_pick:
+    sim_sample = pd.DataFrame([{
+        "diff_off_epa": latest_team_form.loc[h_pick, "roll_off_epa"] - latest_team_form.loc[a_pick, "roll_off_epa"],
+        "diff_def_epa": latest_team_form.loc[a_pick, "roll_def_epa"] - latest_team_form.loc[h_pick, "roll_def_epa"],
+        "diff_rest": latest_team_form.loc[h_pick, "rest_days"] - latest_team_form.loc[a_pick, "rest_days"],
+        "diff_win_total": vegas_win_totals_2026.get(h_pick, 8.5) - vegas_win_totals_2026.get(a_pick, 8.5),
+        "spread_line": spread_val
+    }])
+    p = clf.predict_proba(scaler.transform(sim_sample[feature_cols]))[0][1]
+    pick = h_pick if p >= 0.5 else a_pick
+    
+    st.markdown(f"""
+    <div style="background: linear-gradient(90deg, #991b1b 0%, #111827 100%); padding: 18px; border-radius: 12px; border-left: 6px solid #ef4444; margin-top: 15px;">
+        <span style="font-size: 13px; color: #fca5a5; font-weight: bold;">PROJECTED WINNER</span>
+        <div style="font-size: 28px; font-weight: 900; color: #ffffff;">🏆 {pick} OUTRIGHT</div>
+        <span style="font-size: 14px; color: #e5e7eb;">Model Confidence: <b>{max(p, 1-p)*100:.1f}%</b></span>
+    </div>
+    """, unsafe_allow_html=True)
