@@ -276,7 +276,8 @@ with tab_main:
     # RIGHT COLUMN: HELMET/PLAYER BRANDING & SIMULATOR
     with col_right:
         # High quality transparent background player asset
-        st.image("https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTob7NBaZqbeeK0CTWy-j_LRo1FKyq8FvDdDocNCgUPQw&s=10" \", use_container_width=True)
+        img_url = "https://ewscripps.brightspotcdn.com/dims4/default/b611cf8/2147483647/strip/true/crop/5175x2911+0+0/resize/1280x720!/quality/90/?url=http%3A%2F%2Fewscripps-brightspot.s3.amazonaws.com%2Fb2%2Fde%2Ffc83212f4759a96c03b6caca7946%2Fap21269635997659.jpg"
+        st.image(img_url, use_container_width=True)
 
         st.markdown('<div class="sim-panel">', unsafe_allow_html=True)
         st.markdown("<h3 style='font-family:Teko; font-size:32px; margin:0 0 10px 0; color:#fff;'>⚡ MATCHUP SANDBOX</h3>", unsafe_allow_html=True)
