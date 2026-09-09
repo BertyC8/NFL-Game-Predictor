@@ -207,7 +207,7 @@ clf.fit(X_scaled, y)
 latest_team_form = team_stats.sort_values("gameday").groupby("team").last().reset_index().set_index("team")
 
 # 4. Tab Navigation
-tab_main, tab_perf, tab_analytics = st.tabs(["🔥 MATCH SLATE & SIMULATOR", "📈 PERFORMANCE TRACKER", "📊 ADVANCED ANALYTICS"])
+tab_main, tab_perf, tab_analytics = st.tabs(["MATCH SLATE & SIMULATOR", "PERFORMANCE TRACKER", "ADVANCED ANALYTICS"])
 
 # TAB 1: POSTER SLATE & SIMULATOR
 with tab_main:
@@ -248,9 +248,9 @@ with tab_main:
                 winner = ht if prob >= 0.50 else at
                 confidence = prob if prob >= 0.50 else (1 - prob)
 
-                is_upset = (winner == ht and spread > 0) or (winner == at and spread < 0)
-                pill_class = "matchup-pill-upset" if is_upset else "matchup-pill"
-                pick_badge = f"⚡ UPSET: {winner}" if is_upset else f"PICK: {winner}"
+                sim_is_upset = (winner == ht and spread > 0.5) or (winner == at and spread < -0.5)
+                pill_class = "matchup-pill matchup-pill-upset" if sim_is_upset else "matchup-pill"
+                pick_badge = f"⚡ UPSET: {winner}" if sim_is_upset else f"PICK: {winner}"
 
                 st.markdown(f"""
                 <div class="{pill_class}">
@@ -258,7 +258,7 @@ with tab_main:
                     <span style="font-size: 13px; font-weight: 800; background: rgba(0,0,0,0.3); padding: 4px 10px; border-radius: 12px;">{pick_badge}</span>
                 </div>
                 <div class="meta-row">
-                    <span class="white-pill">📅 {row.get('gameday', 'Upcoming Slate')}</span>
+                    <span class="white-pill">{row.get('gameday', 'Upcoming Games')}</span>
                     <span class="white-pill">Spread: {spread:+.1f}</span>
                     <span class="edge-pill">Win Confidence: {confidence*100:.1f}%</span>
                 </div>
