@@ -248,9 +248,13 @@ with tab_main:
                 winner = ht if prob >= 0.50 else at
                 confidence = prob if prob >= 0.50 else (1 - prob)
 
-                sim_is_upset = (winner == ht and spread > 0.5) or (winner == at and spread < -0.5)
-                pill_class = "matchup-pill matchup-pill-upset" if sim_is_upset else "matchup-pill"
-                pick_badge = f"⚡ UPSET: {winner}" if sim_is_upset else f"PICK: {winner}"
+                sim_is_upset = (winner == ht and spread < -0.5) or (winner == at and spread > 0.5)
+                if is_upset:
+                    pill_class = "matchup-pill matchup-pill-upset"
+                    pick_badge = f"⚡ UPSET: {winner}"
+                else:
+                    pill_class = "matchup-pill"
+                    pick_badge = f"🏆 WINNER: {winner}"
 
                 st.markdown(f"""
                 <div class="{pill_class}">
