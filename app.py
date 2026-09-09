@@ -6,6 +6,7 @@ import seaborn as sns
 import streamlit as st
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+from streamlit.config import _is_unset
 
 # 1. Page Configuration
 st.set_page_config(
@@ -248,8 +249,8 @@ with tab_main:
                 winner = ht if prob >= 0.50 else at
                 confidence = prob if prob >= 0.50 else (1 - prob)
 
-                sim_is_upset = (winner == ht and spread < -0.5) or (winner == at and spread > 0.5)
-                if is_upset:
+                is_upset = (winner == ht and spread < -0.5) or (winner == at and spread > 0.5)
+                if  is_upset:
                     pill_class = "matchup-pill matchup-pill-upset"
                     pick_badge = f"⚡ UPSET: {winner}"
                 else:
