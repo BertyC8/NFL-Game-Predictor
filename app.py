@@ -59,7 +59,7 @@ model_df["away_off_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id
 model_df["away_def_epa"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["away_team"]), {}).get("roll_def_epa", 0.0), axis=1)
 model_df["away_rest"] = model_df.apply(lambda r: metrics_dict.get((r["game_id"], r["away_team"]), {}).get("rest_days", 7.0), axis=1)
 
-# Current season baseline win totals mapping
+# Baseline Preseason Win Totals (Used internally by the model only)
 vegas_win_totals_2026 = {
     "LA": 11.5, "BAL": 11.5, "BUF": 10.5, "SEA": 10.5, "DET": 10.5,
     "NE": 10.5, "KC": 10.5, "CIN": 10.5, "PHI": 10.5, "HOU": 9.5,
@@ -79,7 +79,7 @@ model_df["diff_rest"] = model_df["home_rest"] - model_df["away_rest"]
 model_df["diff_win_total"] = model_df["home_win_total"] - model_df["away_win_total"]
 model_df["spread_line"] = model_df["spread_line"].fillna(0.0)
 
-# 4. Train Model
+# 4. Train Model on Completed Matches
 completed_games = model_df[model_df["result"].notnull()].copy()
 completed_games["home_win"] = (completed_games["result"] > 0).astype(int)
 
@@ -115,6 +115,8 @@ if not upcoming_games.empty:
         a_def = latest_team_form.loc[at, "roll_def_epa"] if at in latest_team_form.index else 0.0
         h_rest = latest_team_form.loc[ht, "rest_days"] if ht in latest_team_form.index else 7.0
         a_rest = latest_team_form.loc[at, "rest_days"] if at in latest_team_form.index else 7.0
+        
+        # Computed internally for features only
         h_wt = vegas_win_totals_2026.get(ht, 8.5)
         a_wt = vegas_win_totals_2026.get(at, 8.5)
         spread = row["spread_line"] if pd.notnull(row["spread_line"]) else 0.0
@@ -138,13 +140,10 @@ if not upcoming_games.empty:
         home_edge = (prob - vegas_home_implied) * 100.0
         away_edge = ((1.0 - prob) - vegas_away_implied) * 100.0
 
-        # Correct Upset Logic: Trigger only on genuine market underdog picks or +5% edge
-        is_upset = False
+        # Market Underdog Upset Logic
         if spread < -0.5 and (prob >= 0.50 or home_edge >= 5.0):
-            is_upset = True
             pick_label = f"⚡ UPSET: {ht} (+{max(0.0, home_edge):.1f}%)"
         elif spread > 0.5 and (prob < 0.50 or away_edge >= 5.0):
-            is_upset = True
             pick_label = f"⚡ UPSET: {at} (+{max(0.0, away_edge):.1f}%)"
         else:
             pick_label = f"🏆 {winner}"
@@ -153,18 +152,16 @@ if not upcoming_games.empty:
             "Matchup": f"{at} @ {ht}",
             "Date": row.get("gameday", "TBD"),
             "Spread": spread,
-            f"{ht} Win Total": h_wt,
-            f"{at} Win Total": a_wt,
             "Machine Pick": pick_label,
             "Confidence": f"{confidence * 100:.1f}%"
         })
     st.dataframe(pd.DataFrame(cards), use_container_width=True)
 else:
-    st.info("No upcoming games without final scores found in nfl_data.db. Use the simulator below.")
+    st.info("No unplayed games found in current database. All games currently have final scores recorded.")
 
 st.markdown("---")
 
-# 6. Machine Accuracy & Performance Tracking (Directly Under Matchups)
+# 6. Machine Accuracy & Performance Tracking
 st.subheader("📈 Machine Accuracy & Performance Tracker")
 
 completed = training_data.copy()
@@ -180,7 +177,6 @@ total_games = len(season_df)
 correct_picks = season_df["correct_pick"].sum()
 overall_acc = (correct_picks / total_games) * 100 if total_games > 0 else 0.0
 
-# Count only true underdog hits against the nflverse spread line
 underdog_hits = season_df[
     (season_df["correct_pick"] == 1) &
     (((season_df["home_win"] == 1) & (season_df["spread_line"] < -0.5)) |
@@ -192,18 +188,42 @@ m1.metric("Season Accuracy", f"{overall_acc:.1f}%")
 m2.metric("Total Correct Picks", f"{correct_picks} / {total_games}")
 m3.metric("Underdog Hits", f"{len(underdog_hits)}")
 
-st.markdown("#### Weekly Accuracy Trend")
-weekly_acc = season_df.groupby("week")["correct_pick"].agg(["count", "sum"]).reset_index()
-weekly_acc["accuracy"] = (weekly_acc["sum"] / weekly_acc["count"]) * 100
+# Weekly Granular Progression
+st.markdown("#### 📅 Weekly Accuracy Progression")
+weekly_stats = season_df.groupby("week")["correct_pick"].agg(
+    Total_Games="count",
+    Correct_Calls="sum"
+).reset_index()
 
-fig_week, ax_week = plt.subplots(figsize=(10, 3))
-sns.lineplot(data=weekly_acc, x="week", y="accuracy", marker="o", color="#2ecc71", linewidth=2.5, ax=ax_week)
-ax_week.axhline(50, color="gray", linestyle="--", alpha=0.6, label="50% Coin Flip")
-ax_week.set_ylim(30, 100)
-ax_week.set_ylabel("Accuracy %")
-ax_week.set_xlabel("Week")
-ax_week.set_title(f"{selected_eval_season} Machine Prediction Accuracy by Week", weight="bold")
-st.pyplot(fig_week)
+weekly_stats["Weekly_Accuracy"] = (weekly_stats["Correct_Calls"] / weekly_stats["Total_Games"]) * 100
+weekly_stats["Running_Season_Accuracy"] = (weekly_stats["Correct_Calls"].cumsum() / weekly_stats["Total_Games"].cumsum()) * 100
+
+fig_w, ax_w = plt.subplots(figsize=(10, 3.5))
+ax_w.plot(weekly_stats["week"], weekly_stats["Weekly_Accuracy"], marker="o", color="#3b82f6", linewidth=2, label="Weekly Pick %")
+ax_w.plot(weekly_stats["week"], weekly_stats["Running_Season_Accuracy"], marker="", color="#10b981", linewidth=2.5, linestyle="--", label="Cumulative %")
+ax_w.axhline(50, color="gray", linestyle=":", alpha=0.7, label="50% Coin Flip")
+
+ax_w.set_title(f"{selected_eval_season} Accuracy Trend by Week", weight="bold")
+ax_w.set_xlabel("Week")
+ax_w.set_ylabel("Accuracy %")
+ax_w.set_ylim(20, 100)
+ax_w.legend(loc="lower right")
+st.pyplot(fig_w)
+
+weekly_display = weekly_stats.copy()
+weekly_display["Weekly Accuracy"] = weekly_display["Weekly_Accuracy"].map("{:.1f}%".format)
+weekly_display["Cumulative Accuracy"] = weekly_display["Running_Season_Accuracy"].map("{:.1f}%".format)
+weekly_display = weekly_display.rename(columns={
+    "week": "Week",
+    "Correct_Calls": "Correct Picks",
+    "Total_Games": "Total Games"
+})
+
+st.dataframe(
+    weekly_display[["Week", "Correct Picks", "Total Games", "Weekly Accuracy", "Cumulative Accuracy"]],
+    use_container_width=True,
+    hide_index=True
+)
 
 st.markdown("#### Team-by-Team Performance")
 home_records = season_df[["home_team", "correct_pick"]].rename(columns={"home_team": "team"})
@@ -270,11 +290,8 @@ else:
     predicted_winner = home_select if prediction == 1 else away_select
     winner_prob = prob if prediction == 1 else (1.0 - prob)
 
-    # In simulator input: spread_input > 0 means Home is underdog, spread_input < 0 means Away is underdog
-    sim_is_upset = (predicted_winner == home_select and spread_input <= 0.5) or \
-                   (predicted_winner == away_select and spread_input >= -0.5)
-
-    st.markdown(f"**Season Win Totals:** {home_select}: `{h_wt}` | {away_select}: `{a_wt}` (Differential: `{diff_wt:+.1f}`)")
+    sim_is_upset = (predicted_winner == home_select and spread_input > 0.5) or \
+                   (predicted_winner == away_select and spread_input < -0.5)
 
     if sim_is_upset:
         st.warning(f"### ⚡ UPSET ALERT: Machine projects **{predicted_winner}** to win outright despite being the underdog!")
