@@ -12,6 +12,11 @@ st.set_page_config(page_title="NFL Prediction Dashboard", layout="wide")
 st.title("🏈 NFL Matchup Predictor & Performance Dashboard")
 st.markdown("Automated game winner predictions using 3-game rolling EPA, rest margins, spread consensus, and Vegas season win totals.")
 
+# Helper to convert spread points into Vegas market implied win probability
+def spread_to_implied_prob(spread_points):
+    # In nflverse: spread > 0 means Home favored; spread < 0 means Away favored
+    return 1.0 / (1.0 + 10.0 ** (-spread_points / 14.0))
+
 # 1. Load Data
 @st.cache_data(ttl=60)
 def load_data():
@@ -88,7 +93,7 @@ y = training_data["home_win"]
 clf = LogisticRegression()
 clf.fit(X_scaled, y)
 
-# 5. Scheduled Matchups & Machine Winner Picks (With Upset Detection)
+# 5. Scheduled Matchups & Machine Winner Picks
 st.subheader("📅 Scheduled Matchups & Machine Winner Picks")
 
 upcoming_games = model_df[model_df["result"].isnull()].copy()
@@ -125,17 +130,24 @@ if not upcoming_games.empty:
         scaled_sample = scaler.transform(sample[feature_cols])
         prob = clf.predict_proba(scaled_sample)[0][1]
         winner = ht if prob >= 0.50 else at
-        confidence = prob if prob >= 0.50 else (1 - prob)
+        confidence = prob if prob >= 0.50 else (1.0 - prob)
 
-        # Underdog / Upset detection logic
-        is_upset = (winner == ht and spread < -0.5) or (winner == at and spread > 0.5)
+        # Implied market chances
+        vegas_home_implied = spread_to_implied_prob(spread)
+        vegas_away_implied = 1.0 - vegas_home_implied
+        home_edge = (prob - vegas_home_implied) * 100.0
+        away_edge = ((1.0 - prob) - vegas_away_implied) * 100.0
 
-        if is_upset:
-            pick_label = f"⚡ UPSET: {winner}"
-            badge_color = "linear-gradient(90deg, #f59e0b 0%, #d97706 100%)" # Amber badge
+        # Correct Upset Logic: Trigger only on genuine market underdog picks or +5% edge
+        is_upset = False
+        if spread < -0.5 and (prob >= 0.50 or home_edge >= 5.0):
+            is_upset = True
+            pick_label = f"⚡ UPSET: {ht} (+{max(0.0, home_edge):.1f}%)"
+        elif spread > 0.5 and (prob < 0.50 or away_edge >= 5.0):
+            is_upset = True
+            pick_label = f"⚡ UPSET: {at} (+{max(0.0, away_edge):.1f}%)"
         else:
-            pick_label = f"🏆 PICK: {winner}"
-            badge_color = "linear-gradient(90deg, #10b981 0%, #059669 100%)" # Emerald badge
+            pick_label = f"🏆 {winner}"
 
         cards.append({
             "Matchup": f"{at} @ {ht}",
@@ -152,7 +164,7 @@ else:
 
 st.markdown("---")
 
-# 6. Machine Accuracy & Performance Tracking (Directly Under Picks)
+# 6. Machine Accuracy & Performance Tracking (Directly Under Matchups)
 st.subheader("📈 Machine Accuracy & Performance Tracker")
 
 completed = training_data.copy()
@@ -168,10 +180,17 @@ total_games = len(season_df)
 correct_picks = season_df["correct_pick"].sum()
 overall_acc = (correct_picks / total_games) * 100 if total_games > 0 else 0.0
 
+# Count only true underdog hits against the nflverse spread line
+underdog_hits = season_df[
+    (season_df["correct_pick"] == 1) &
+    (((season_df["home_win"] == 1) & (season_df["spread_line"] < -0.5)) |
+     ((season_df["home_win"] == 0) & (season_df["spread_line"] > 0.5)))
+]
+
 m1, m2, m3 = st.columns(3)
 m1.metric("Season Accuracy", f"{overall_acc:.1f}%")
 m2.metric("Total Correct Picks", f"{correct_picks} / {total_games}")
-m3.metric("Underdog Hits", f"{len(season_df[(season_df['correct_pick'] == 1) & (((season_df['home_win'] == 1) & (season_df['spread_line'] < 0)) | ((season_df['home_win'] == 0) & (season_df['spread_line'] > 0)))])}")
+m3.metric("Underdog Hits", f"{len(underdog_hits)}")
 
 st.markdown("#### Weekly Accuracy Trend")
 weekly_acc = season_df.groupby("week")["correct_pick"].agg(["count", "sum"]).reset_index()
@@ -210,7 +229,7 @@ st.dataframe(team_perf[["Team", "Accuracy", "Correct Calls", "Games Predicted"]]
 
 st.markdown("---")
 
-# 7. Custom Matchup Simulator (Predicts Clear Winner + Upset Flag)
+# 7. Custom Matchup Simulator
 st.subheader("🎯 Custom Matchup Simulator")
 
 team_list = sorted(vegas_win_totals_2026.keys())
@@ -234,12 +253,13 @@ else:
 
     h_wt = vegas_win_totals_2026.get(home_select, 8.5)
     a_wt = vegas_win_totals_2026.get(away_select, 8.5)
+    diff_wt = h_wt - a_wt
 
     matchup_sample = pd.DataFrame([{
         "diff_off_epa": h_epa - a_epa,
         "diff_def_epa": a_def - h_def,
         "diff_rest": h_rest - a_rest,
-        "diff_win_total": h_wt - a_wt,
+        "diff_win_total": diff_wt,
         "spread_line": spread_input
     }])
 
@@ -250,20 +270,20 @@ else:
     predicted_winner = home_select if prediction == 1 else away_select
     winner_prob = prob if prediction == 1 else (1.0 - prob)
 
-    # Simulator Upset Flag
+    # In simulator input: spread_input > 0 means Home is underdog, spread_input < 0 means Away is underdog
     sim_is_upset = (predicted_winner == home_select and spread_input > 0.5) or \
                    (predicted_winner == away_select and spread_input < -0.5)
 
     st.markdown(f"**Season Win Totals:** {home_select}: `{h_wt}` | {away_select}: `{a_wt}` (Differential: `{diff_wt:+.1f}`)")
 
     if sim_is_upset:
-        st.warning(f"### ⚡ UPSET ALERT: Machine projects **{predicted_winner}** to win outright despite being the betting underdog!")
+        st.warning(f"### ⚡ UPSET ALERT: Machine projects **{predicted_winner}** to win outright despite being the underdog!")
     else:
         st.success(f"### 🏆 Machine Pick: **{predicted_winner}** to win outright")
 
     st.caption(f"Calculated win confidence: **{winner_prob * 100:.1f}%** | Spread: **{spread_input:+.1f}**")
     st.progress(float(prob))
-    
+
 st.markdown("---")
 
 # 8. Visualizations
