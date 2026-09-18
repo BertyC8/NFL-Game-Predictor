@@ -281,7 +281,7 @@ with tab_main:
             </div>
         </div>
         """, unsafe_allow_html=True)
-        
+
     with col_right:
         # High quality reliable sports background asset
         img_url = "https://images.unsplash.com/photo-1566577739112-5180d4bf9390?auto=format&fit=crop&w=900&q=80"
@@ -319,7 +319,7 @@ with tab_main:
             # Sandbox betting convention:
             # spread_val < -0.5 = Home favored (Away is dog)
             # spread_val > 0.5 = Away favored (Home is dog)
-            sim_upset = (sim_winner == home_team and spread_val > 0.5) or (sim_winner == away_team and spread_val < -0.5)
+            sim_upset = (sim_winner == home_team and spread_val < -0.5) or (sim_winner == away_team and spread_val > 0.5)
 
             if sim_upset:
                 banner_bg = "linear-gradient(90deg, #d97706 0%, #78350f 100%)"
