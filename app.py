@@ -326,11 +326,17 @@ with tab_main:
 
 # TAB 2: MODEL ACCURACY TRACKER
 with tab_perf:
-    st.markdown("<h3 style='font-family:Teko; font-size:36px;'>MACHINE HIT-RATE & PROGRESSION</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 style='font-family:Teko; font-size:36px; margin:0;'>MACHINE HIT-RATE & PROGRESSION</h3>", unsafe_allow_html=True)
+    
+    # 1. Evaluate completed games
     completed = training_data.copy()
     completed["pred_prob"] = clf.predict_proba(X_scaled)[:, 1]
     completed["pred_home_win"] = (completed["pred_prob"] >= 0.50).astype(int)
     completed["correct_pick"] = (completed["pred_home_win"] == completed["home_win"]).astype(int)
+
+    completed["Machine Pick"] = np.where(completed["pred_home_win"] == 1, completed["home_team"], completed["away_team"])
+    completed["Actual Winner"] = np.where(completed["home_win"] == 1, completed["home_team"], completed["away_team"])
+    completed["Outcome"] = np.where(completed["correct_pick"] == 1, "✅ Correct", "❌ Incorrect")
 
     eval_seasons = sorted(completed["season"].unique(), reverse=True)
     selected_eval_season = st.selectbox("Season Evaluation", eval_seasons)
@@ -340,23 +346,87 @@ with tab_perf:
     correct_p = season_df["correct_pick"].sum()
     acc = (correct_p / total_g) * 100 if total_g > 0 else 0.0
 
+    # True Underdog hits against nflverse line convention
+    underdog_hits = season_df[
+        (season_df["correct_pick"] == 1) &
+        (((season_df["home_win"] == 1) & (season_df["spread_line"] < -0.5)) |
+         ((season_df["home_win"] == 0) & (season_df["spread_line"] > 0.5)))
+    ]
+
+    # Top KPI Metrics
     m1, m2, m3 = st.columns(3)
     m1.metric("Straight-Up Win %", f"{acc:.1f}%")
     m2.metric("Total Correct Hits", f"{correct_p} / {total_g}")
-    m3.metric("Underdog Pick Hits", f"{len(season_df[(season_df['correct_pick'] == 1) & (season_df['spread_line'] > 0)])}")
+    m3.metric("Underdog Pick Hits", f"{len(underdog_hits)}")
 
-    weekly_stats = season_df.groupby("week")["correct_pick"].agg(Total_Games="count", Correct_Calls="sum").reset_index()
+    # 2. Weekly Progression Chart & Cumulative Table
+    st.markdown("<h4 style='font-family:Teko; font-size:26px; margin-top:20px;'>WEEKLY HIT-RATE & PROGRESSION</h4>", unsafe_allow_html=True)
+    weekly_stats = season_df.groupby("week")["correct_pick"].agg(
+        Total_Games="count",
+        Correct_Calls="sum"
+    ).reset_index()
+
     weekly_stats["Weekly Accuracy"] = (weekly_stats["Correct_Calls"] / weekly_stats["Total_Games"]) * 100
+    weekly_stats["Cumulative Accuracy"] = (weekly_stats["Correct_Calls"].cumsum() / weekly_stats["Total_Games"].cumsum()) * 100
 
     fig_w, ax_w = plt.subplots(figsize=(10, 3.5))
     fig_w.patch.set_facecolor('#0b0204')
     ax_w.set_facecolor('#1a0306')
     ax_w.plot(weekly_stats["week"], weekly_stats["Weekly Accuracy"], marker='o', color='#ef4444', linewidth=2.5, label="Weekly Hit %")
+    ax_w.plot(weekly_stats["week"], weekly_stats["Cumulative Accuracy"], marker='', color='#10b981', linewidth=2.5, linestyle='--', label="Cumulative Season %")
     ax_w.axhline(50, color='#64748b', linestyle=':', label="50% Coin Flip")
     ax_w.tick_params(colors="white")
+    ax_w.set_ylim(20, 100)
     ax_w.set_title(f"{selected_eval_season} Accuracy Swing by Week", color="white", weight="bold")
     ax_w.legend(facecolor='#0b0204', edgecolor='none', labelcolor='white')
     st.pyplot(fig_w)
+
+    weekly_display = weekly_stats.copy()
+    weekly_display["Weekly Accuracy"] = weekly_display["Weekly Accuracy"].map("{:.1f}%".format)
+    weekly_display["Cumulative Accuracy"] = weekly_display["Cumulative Accuracy"].map("{:.1f}%".format)
+    weekly_display = weekly_display.rename(columns={
+        "week": "Week",
+        "Correct_Calls": "Correct Picks",
+        "Total_Games": "Total Games"
+    })
+    st.dataframe(
+        weekly_display[["Week", "Correct Picks", "Total Games", "Weekly Accuracy", "Cumulative Accuracy"]],
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # 3. Team-by-Team Breakdown
+    st.markdown("<h4 style='font-family:Teko; font-size:26px; margin-top:20px;'>ACCURACY BREAKDOWN PER TEAM</h4>", unsafe_allow_html=True)
+    home_recs = season_df[["home_team", "correct_pick"]].rename(columns={"home_team": "team"})
+    away_recs = season_df[["away_team", "correct_pick"]].rename(columns={"away_team": "team"})
+    team_perf = pd.concat([home_recs, away_recs]).groupby("team")["correct_pick"].agg(
+        Total_Games="count",
+        Correct_Calls="sum"
+    ).reset_index()
+
+    team_perf["Accuracy Pct"] = (team_perf["Correct_Calls"] / team_perf["Total_Games"]) * 100
+    team_perf = team_perf.sort_values(by=["Accuracy Pct", "Correct_Calls"], ascending=[False, False]).reset_index(drop=True)
+    team_perf["Accuracy"] = team_perf["Accuracy Pct"].map("{:.1f}%".format)
+    team_perf = team_perf.rename(columns={
+        "team": "Team",
+        "Total_Games": "Games Evaluated",
+        "Correct_Calls": "Correct Calls"
+    })
+    st.dataframe(
+        team_perf[["Team", "Accuracy", "Correct Calls", "Games Evaluated"]],
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # 4. Game-by-Game Audit Log
+    with st.expander(f"🔍 View Full {selected_eval_season} Game-by-Game Audit Log"):
+        log_df = season_df[["week", "away_team", "home_team", "Machine Pick", "Actual Winner", "Outcome"]].copy()
+        log_df = log_df.rename(columns={
+            "week": "Week",
+            "away_team": "Away",
+            "home_team": "Home"
+        }).sort_values(by=["Week", "Away"])
+        st.dataframe(log_df, use_container_width=True, hide_index=True)
 
 # TAB 3: SEABORN CORRELATIONS
 with tab_analytics:
