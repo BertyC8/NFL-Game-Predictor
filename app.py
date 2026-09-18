@@ -249,8 +249,12 @@ with tab_main:
                 winner = ht if prob >= 0.50 else at
                 confidence = prob if prob >= 0.50 else (1 - prob)
 
+                # Correct nflverse spread logic:
+                # spread < -0.5 = Away Favored (Home is dog)
+                # spread > 0.5 = Home Favored (Away is dog)
                 is_upset = (winner == ht and spread < -0.5) or (winner == at and spread > 0.5)
-                if  is_upset:
+                
+                if is_upset:
                     pill_class = "matchup-pill matchup-pill-upset"
                     pick_badge = f"⚡ UPSET: {winner}"
                 else:
@@ -277,11 +281,10 @@ with tab_main:
             </div>
         </div>
         """, unsafe_allow_html=True)
-
-    # RIGHT COLUMN: HELMET/PLAYER BRANDING & SIMULATOR
+        
     with col_right:
-        # High quality transparent background player asset
-        img_url = "https://ewscripps.brightspotcdn.com/dims4/default/b611cf8/2147483647/strip/true/crop/5175x2911+0+0/resize/1280x720!/quality/90/?url=http%3A%2F%2Fewscripps-brightspot.s3.amazonaws.com%2Fb2%2Fde%2Ffc83212f4759a96c03b6caca7946%2Fap21269635997659.jpg"
+        # High quality reliable sports background asset
+        img_url = "https://images.unsplash.com/photo-1566577739112-5180d4bf9390?auto=format&fit=crop&w=900&q=80"
         st.image(img_url, use_container_width=True)
 
         st.markdown('<div class="sim-panel">', unsafe_allow_html=True)
@@ -313,11 +316,25 @@ with tab_main:
             sim_winner = home_team if p >= 0.50 else away_team
             sim_conf = p if p >= 0.50 else (1.0 - p)
 
+            # Sandbox betting convention:
+            # spread_val < -0.5 = Home favored (Away is dog)
+            # spread_val > 0.5 = Away favored (Home is dog)
+            sim_upset = (sim_winner == home_team and spread_val > 0.5) or (sim_winner == away_team and spread_val < -0.5)
+
+            if sim_upset:
+                banner_bg = "linear-gradient(90deg, #d97706 0%, #78350f 100%)"
+                title_text = "⚡ UPSET ALERT DETECTED"
+                sub_text = f"Machine overrides market line ({spread_val:+.1f}) based on EPA advantage"
+            else:
+                banner_bg = "linear-gradient(90deg, #b91c1c 0%, #450a0a 100%)"
+                title_text = "Projected Victor"
+                sub_text = "Consensus Pick"
+
             st.markdown(f"""
-            <div style="background: linear-gradient(90deg, #b91c1c 0%, #450a0a 100%); border-radius: 12px; padding: 16px; margin: 15px 0; text-align: center;">
-                <span style="font-size: 13px; text-transform: uppercase; color: #fca5a5; font-weight:700;">Projected Victor</span>
+            <div style="background: {banner_bg}; border-radius: 12px; padding: 16px; margin: 15px 0; text-align: center;">
+                <span style="font-size: 13px; text-transform: uppercase; color: #fde68a if {sim_upset} else #fca5a5; font-weight:700;">{title_text}</span>
                 <div style="font-size: 28px; font-weight: 800; color: #fff; font-family:'Teko'; letter-spacing:1px; margin: 4px 0;">🏆 {sim_winner} OUTRIGHT</div>
-                <span style="font-size: 14px; color: #ffffff;">Model Win Expectancy: <b>{sim_conf*100:.1f}%</b></span>
+                <span style="font-size: 14px; color: #ffffff;">Model Win Expectancy: <b>{sim_conf*100:.1f}%</b> ({sub_text})</span>
             </div>
             """, unsafe_allow_html=True)
             st.progress(float(p))
