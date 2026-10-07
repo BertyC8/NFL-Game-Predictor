@@ -2,7 +2,7 @@
 
 An end-to-end sports analytics pipeline and machine learning web application that forecasts weekly NFL matchups, flags outright betting upsets, and tracks walk-forward model performance across seasons.
 
-**Live Web Application:** [Launch Streamlit App](https://nfl-game-predictor-wewzv3xca7yhe3csvhgcwy.streamlit.app/)
+**Live Web Application:** [Launch Streamlit App](https://nfl-game-predictor-bertyc8.streamlit.app/)
 
 Project Overview
 - **Automated Winner Forecasts:** Predicts straight-up weekly NFL game outcomes and model confidence percentages using a calibrated Logistic Regression classifier.
