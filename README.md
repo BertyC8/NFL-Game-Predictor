@@ -1,4 +1,5 @@
-NFL Game Predictor & Analytics Engine
+**NFL Game Predictor & Analytics Engine**
+
 An end-to-end sports analytics pipeline and machine learning web application that forecasts weekly NFL matchups, flags outright betting upsets, and tracks walk-forward model performance across seasons.
 
 **Live Web Application:** [Launch Streamlit App](https://nfl-game-predictor-wewzv3xca7yhe3csvhgcwy.streamlit.app/)
